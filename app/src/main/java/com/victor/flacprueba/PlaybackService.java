@@ -3,22 +3,43 @@ package com.victor.flacprueba;
 import android.app.*;
 import android.content.*;
 import android.media.MediaPlayer;
+import android.media.MediaMetadata;
+import android.media.session.MediaSession;
+import android.media.session.PlaybackState;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.media.MediaMetadataRetriever;
 import android.os.*;
+import android.net.Uri;
+import org.json.*;
+import java.io.*;
+import java.nio.charset.StandardCharsets;
 
 /** Owns playback while the WebView activity is not visible. */
 public class PlaybackService extends Service {
+    interface Controller { void command(int direction); }
+    static Controller control;
     static MediaPlayer player;
     static String trackUri;
+    static String title="FLAC · Prueba", artist="Reproduciendo música";
+    static void metadata(String t,String a){title=t;artist=a;if(instance!=null)instance.publish(player!=null&&prepared&&player.isPlaying());}
     static boolean prepared;
     private static PlaybackService instance;
+    private MediaSession session;
+    private String artworkUri="";
+    private Bitmap artwork;
+    private final Handler handler=new Handler(Looper.getMainLooper());
+    private final Runnable progress=new Runnable(){@Override public void run(){if(player!=null&&prepared){syncSession();handler.postDelayed(this,1000);}}};
     private static final int ID=47;
     private static final String CHANNEL="flac_playback";
     private static final String TOGGLE="com.victor.flacprueba.TOGGLE";
     private static final String STOP="com.victor.flacprueba.STOP";
+    private static final String NEXT="com.victor.flacprueba.NEXT";
+    private static final String PREV="com.victor.flacprueba.PREV";
 
     static void attach(MediaPlayer p,String uri){
         if(player!=null && player!=p) { try { player.release(); } catch(Exception ignored) {} }
-        player=p; trackUri=uri; prepared=false;
+        player=p; trackUri=uri; prepared=false; if(instance!=null){instance.artworkUri="";instance.artwork=null;}
     }
     static void update(Context context,boolean isPrepared){
         prepared=isPrepared;
@@ -27,8 +48,8 @@ public class PlaybackService extends Service {
             if(Build.VERSION.SDK_INT>=26)context.startForegroundService(intent);else context.startService(intent);
             if(instance!=null)instance.show();
         }else if(instance!=null){
-            instance.stopForeground(STOP_FOREGROUND_REMOVE);
-            instance.stopSelf();
+            instance.stopForeground(STOP_FOREGROUND_DETACH);
+            if(player!=null && isPrepared)instance.showPaused();else instance.stopSelf();
         }
     }
     static void release(){
@@ -39,6 +60,18 @@ public class PlaybackService extends Service {
     @Override public void onCreate(){super.onCreate();instance=this;
         NotificationChannel channel=new NotificationChannel(CHANNEL,"Reproducción de música",NotificationManager.IMPORTANCE_LOW);
         ((NotificationManager)getSystemService(NOTIFICATION_SERVICE)).createNotificationChannel(channel);
+        session=new MediaSession(this,"FLAC playback");
+        session.setFlags(MediaSession.FLAG_HANDLES_MEDIA_BUTTONS|MediaSession.FLAG_HANDLES_TRANSPORT_CONTROLS);
+        session.setCallback(new MediaSession.Callback(){
+            @Override public void onPlay(){dispatch(0,true);}
+            @Override public void onPause(){dispatch(0,false);}
+            @Override public void onSkipToNext(){dispatch(1,false);}
+            @Override public void onSkipToPrevious(){dispatch(-1,false);}
+            @Override public void onSeekTo(long pos){try{if(player!=null&&prepared){player.seekTo((int)Math.max(0,Math.min(pos,player.getDuration())));syncSession();}}catch(Exception ignored){}}
+            @Override public void onStop(){try{if(player!=null&&prepared&&player.isPlaying())player.pause();update(PlaybackService.this,true);}catch(Exception ignored){}}
+        });
+        session.setActive(true);
+        handler.post(progress);
     }
     @Override public int onStartCommand(Intent intent,int flags,int startId){
         String action=intent==null?null:intent.getAction();
@@ -46,31 +79,100 @@ public class PlaybackService extends Service {
             if(player!=null && prepared){player.pause();update(this,true);}
             return START_NOT_STICKY;
         }
+        if(NEXT.equals(action)||PREV.equals(action)){int d=NEXT.equals(action)?1:-1;if(control!=null)control.command(d);else skipWithoutActivity(d);return START_STICKY;}
+        if(TOGGLE.equals(action) && control!=null){control.command(0);return START_STICKY;}
         if(TOGGLE.equals(action) && player!=null && prepared){
             if(player.isPlaying())player.pause();else player.start();
             update(this,true);
         }
-        if(player!=null && prepared && player.isPlaying())show();else stopSelf();
+        if(player!=null && prepared && player.isPlaying())show();else if(player!=null&&prepared)showPaused();else stopSelf();
         return START_NOT_STICKY;
+    }
+    private void dispatch(int direction,boolean play){
+        if(direction!=0){if(control!=null)control.command(direction);else skipWithoutActivity(direction);return;}
+        try{if(player==null||!prepared)return;
+            if(player.isPlaying()!=play){if(control!=null)control.command(0);else{if(play)player.start();else player.pause();update(this,true);}}
+        }catch(Exception ignored){}
+    }
+    private void syncSession(){
+        if(session==null)return;
+        boolean playing=false;long position=0,duration=0;
+        try{if(player!=null&&prepared){playing=player.isPlaying();position=player.getCurrentPosition();duration=player.getDuration();}}catch(Exception ignored){}
+        session.setPlaybackState(new PlaybackState.Builder()
+            .setActions(PlaybackState.ACTION_PLAY|PlaybackState.ACTION_PAUSE|PlaybackState.ACTION_PLAY_PAUSE|PlaybackState.ACTION_SKIP_TO_NEXT|PlaybackState.ACTION_SKIP_TO_PREVIOUS|PlaybackState.ACTION_SEEK_TO|PlaybackState.ACTION_STOP)
+            .setState(playing?PlaybackState.STATE_PLAYING:PlaybackState.STATE_PAUSED,position,playing?1f:0f,android.os.SystemClock.elapsedRealtime()).build());
+        MediaMetadata.Builder data=new MediaMetadata.Builder().putString(MediaMetadata.METADATA_KEY_TITLE,title)
+            .putString(MediaMetadata.METADATA_KEY_ARTIST,artist).putLong(MediaMetadata.METADATA_KEY_DURATION,duration);
+        if(artwork!=null)data.putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART,artwork);
+        session.setMetadata(data.build());
+    }
+    private void refreshArtwork(){
+        if(trackUri==null||trackUri.equals(artworkUri))return;
+        final String uri=trackUri;artworkUri=uri;artwork=null;
+        new Thread(()->{
+            Bitmap result=null;
+            try{
+                byte[] bytes=null;
+                MediaMetadataRetriever retriever=new MediaMetadataRetriever();
+                try{retriever.setDataSource(this,Uri.parse(uri));bytes=retriever.getEmbeddedPicture();}finally{retriever.release();}
+                if(bytes==null){try(InputStream in=getContentResolver().openInputStream(Uri.parse(uri))){bytes=FlacArtwork.read(in);}}
+                if(bytes!=null){BitmapFactory.Options opt=new BitmapFactory.Options();opt.inJustDecodeBounds=true;BitmapFactory.decodeByteArray(bytes,0,bytes.length,opt);
+                    opt.inSampleSize=1;while(opt.outWidth/opt.inSampleSize>512||opt.outHeight/opt.inSampleSize>512)opt.inSampleSize*=2;
+                    opt.inJustDecodeBounds=false;result=BitmapFactory.decodeByteArray(bytes,0,bytes.length,opt);}
+            }catch(Exception ignored){}
+            final Bitmap cover=result;
+            handler.post(()->{if(uri.equals(trackUri)){artwork=cover;syncSession();if(player!=null&&prepared)publish(player.isPlaying());}});
+        },"notification-artwork").start();
     }
     private PendingIntent command(String action,int request){
         Intent intent=new Intent(this,PlaybackService.class).setAction(action);
         return PendingIntent.getService(this,request,intent,PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
     }
-    private void show(){
-        if(player==null||!prepared||!player.isPlaying())return;
+    private void show(){publish(true);}
+    private void showPaused(){publish(false);}
+    private void publish(boolean active){
+        if(player==null||!prepared)return;
+        refreshArtwork();syncSession();
         Intent launch=new Intent(this,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
         PendingIntent open=PendingIntent.getActivity(this,0,launch,PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
+        Notification.Action previous=new Notification.Action.Builder(android.R.drawable.ic_media_previous,"Anterior",command(PREV,3)).build();
+        Notification.Action toggle=new Notification.Action.Builder(active?android.R.drawable.ic_media_pause:android.R.drawable.ic_media_play,active?"Pausar":"Reanudar",command(TOGGLE,1)).build();
+        Notification.Action next=new Notification.Action.Builder(android.R.drawable.ic_media_next,"Siguiente",command(NEXT,4)).build();
         Notification notification=new Notification.Builder(this,CHANNEL)
             .setSmallIcon(android.R.drawable.ic_media_play)
-            .setContentTitle("FLAC · Prueba")
-            .setContentText("Reproduciendo música")
-            .setContentIntent(open).setOngoing(true)
-            .addAction(new Notification.Action.Builder(android.R.drawable.ic_media_pause,"Pausar",command(TOGGLE,1)).build())
-            .addAction(new Notification.Action.Builder(android.R.drawable.ic_menu_close_clear_cancel,"Detener",command(STOP,2)).build())
-            .setStyle(new Notification.MediaStyle()).build();
-        startForeground(ID,notification);
+            .setContentTitle(title)
+            .setContentText(artist)
+            .setLargeIcon(artwork)
+            .setCategory(Notification.CATEGORY_TRANSPORT)
+            .setContentIntent(open).setOngoing(active)
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
+            .addAction(previous).addAction(toggle).addAction(next)
+            .setStyle(new Notification.MediaStyle().setMediaSession(session.getSessionToken()).setShowActionsInCompactView(0,1,2)).build();
+        if(active)startForeground(ID,notification);
+        else ((NotificationManager)getSystemService(NOTIFICATION_SERVICE)).notify(ID,notification);
     }
-    @Override public void onDestroy(){if(instance==this)instance=null;super.onDestroy();}
+    private void skipWithoutActivity(int direction){
+        try{
+            File file=new File(getFilesDir(),"library.json");
+            ByteArrayOutputStream out=new ByteArrayOutputStream();
+            try(InputStream in=new FileInputStream(file)){byte[] buf=new byte[8192];int n;while((n=in.read(buf))!=-1)out.write(buf,0,n);}
+            JSONArray songs=new JSONArray(out.toString("UTF-8"));if(songs.length()==0)return;
+            int current=0;
+            for(int i=0;i<songs.length();i++)if(songs.optJSONObject(i).optString("uri").equals(trackUri)){current=i;break;}
+            int next=(current+direction+songs.length())%songs.length();
+            String queueJson=getSharedPreferences("player",MODE_PRIVATE).getString("queue",null);
+            if(queueJson!=null){try{JSONArray queue=new JSONArray(queueJson);int at=-1;for(int i=0;i<queue.length();i++)if(queue.optInt(i,-1)==current){at=i;break;}if(at>=0&&queue.length()>0){int candidate=queue.optInt((at+direction+queue.length())%queue.length(),next);if(candidate>=0&&candidate<songs.length())next=candidate;}}catch(Exception ignored){}}
+            JSONObject song=songs.optJSONObject(next);
+            String uri=song.optString("uri");
+            MediaPlayer replacement=new MediaPlayer();replacement.setAudioAttributes(new android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_MEDIA).setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC).build());
+            replacement.setDataSource(this,Uri.parse(uri));attach(replacement,uri);
+            title=song.optString("title","Música");artist=song.optString("artist","Artista desconocido");
+            getSharedPreferences("player",MODE_PRIVATE).edit().putString("track",uri).putInt("position",0).apply();
+            replacement.setOnPreparedListener(mp->{prepared=true;mp.start();update(this,true);});
+            replacement.setOnCompletionListener(mp->skipWithoutActivity(1));
+            replacement.prepareAsync();
+        }catch(Exception ignored){}
+    }
+    @Override public void onDestroy(){handler.removeCallbacksAndMessages(null);if(session!=null){session.setActive(false);session.release();session=null;}if(instance==this)instance=null;super.onDestroy();}
     @Override public IBinder onBind(Intent intent){return null;}
 }
