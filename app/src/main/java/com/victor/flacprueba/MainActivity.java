@@ -45,7 +45,9 @@ public class MainActivity extends Activity {
 
     @Override public void onCreate(Bundle state){
         super.onCreate(state);prefs=getSharedPreferences("player",MODE_PRIVATE);
+        if(Build.VERSION.SDK_INT>=33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS")!=android.content.pm.PackageManager.PERMISSION_GRANTED){new AlertDialog.Builder(this).setTitle("Controles de reproducción").setMessage("Permite las notificaciones para mostrar los controles de música. La reproducción en segundo plano usa un servicio multimedia de Android.").setPositiveButton("Permitir acceso",(d,w)->requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"},54)).setNegativeButton("Ahora no",null).show();}
         audio=(AudioManager)getSystemService(AUDIO_SERVICE);
+        PlaybackService.control=direction->runOnUiThread(()->{if(direction==0){if(player!=null&&ready){if(player.isPlaying())pause();else start();}}else skipTrack(direction);});
         focus=new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN).setAudioAttributes(attributes())
             .setOnAudioFocusChangeListener(n->{if(n<0)pause();},ui).build();
         if(Build.VERSION.SDK_INT>=33)registerReceiver(noisy,new IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY),Context.RECEIVER_NOT_EXPORTED);
@@ -126,7 +128,7 @@ public class MainActivity extends Activity {
         @JavascriptInterface public void seek(long ms){ui.post(()->{if(ready&&player!=null){player.seekTo(Math.max(0,Math.min(ms,player.getDuration())),MediaPlayer.SEEK_CLOSEST);sendPosition();}});}
         @JavascriptInterface public void skip(int direction){ui.post(()->skipTrack(direction));}
         @JavascriptInterface public void importLyrics(){ui.post(()->{if(selected==null)return;pendingLyric=Uri.parse(selected.optString("uri"));Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);i.putExtra(Intent.EXTRA_LOCAL_ONLY,true);startActivityForResult(i,LETTER);});}
-        @JavascriptInterface public void appearance(boolean dark,boolean glass,int hue){ui.post(()->{prefs.edit().putBoolean("dark",dark).putBoolean("glass",glass).putInt("hue",Math.max(0,Math.min(4,hue))).apply();systemColors(dark);});}
+        @JavascriptInterface public void appearance(boolean dark,boolean glass,int hue){ui.post(()->{prefs.edit().putBoolean("dark",dark).putBoolean("glass",glass).putInt("hue",Math.max(0,Math.min(5,hue))).apply();systemColors(dark);});}
         @JavascriptInterface public void favorite(){ui.post(()->{if(selected==null)return;String id=selected.optString("uri");Set<String> f=new HashSet<>(prefs.getStringSet("favorites",new HashSet<>()));if(!f.add(id))f.remove(id);prefs.edit().putStringSet("favorites",f).apply();emit("onFavorites",new JSONArray(f));});}
         @JavascriptInterface public void lyricOffset(int delta){ui.post(()->{if(selected==null)return;String id=key(selected.optString("uri"));int offset=Math.max(-60000,Math.min(60000,prefs.getInt("offset_"+id,0)+delta));prefs.edit().putInt("offset_"+id,offset).apply();sendLyrics();});}
     }
@@ -146,6 +148,7 @@ public class MainActivity extends Activity {
         File[] cachedArt=getCacheDir().listFiles((dir,name)->name.startsWith("art_"));if(cachedArt!=null)for(File file:cachedArt)file.delete();
         int generation=scanGeneration.incrementAndGet();scanning=true;scanStatus="Buscando FLAC en la carpeta y sus subcarpetas…";sendScan();
         scanWorker.execute(()->{
+            java.util.HashMap<String,Long> knownDates=new java.util.HashMap<>();for(int i=0;i<library.length();i++){JSONObject old=library.optJSONObject(i);if(old!=null)knownDates.put(old.optString("uri"),old.optLong("addedAt",System.currentTimeMillis()));}
             JSONArray found=new JSONArray();ArrayDeque<String> dirs=new ArrayDeque<>();Set<String> visited=new HashSet<>();int skipped=0;
             try{
                 dirs.add(DocumentsContract.getTreeDocumentId(tree));
@@ -163,7 +166,7 @@ public class MainActivity extends Activity {
                             if(name==null||!name.toLowerCase(Locale.ROOT).endsWith(".flac"))continue;
                             if(found.length()>=20000)throw new IOException("Esta prueba admite hasta 20000 FLAC por carpeta");
                             Uri doc=DocumentsContract.buildDocumentUriUsingTree(tree,child);JSONObject song=new JSONObject();
-                            put(song,"uri",doc.toString());put(song,"title",name.substring(0,name.length()-5));put(song,"artist","Artista desconocido");put(song,"album","Sin álbum");put(song,"duration",0);
+                            put(song,"uri",doc.toString());put(song,"title",name.substring(0,name.length()-5));put(song,"artist","Artista desconocido");put(song,"album","Sin álbum");put(song,"duration",0);put(song,"addedAt",knownDates.containsKey(doc.toString())?knownDates.get(doc.toString()):System.currentTimeMillis());
                             MediaMetadataRetriever m=new MediaMetadataRetriever();
                             try{m.setDataSource(this,doc);metadata(m,song);}catch(Exception e){skipped++;}finally{try{m.release();}catch(Exception ignored){}}
                             found.put(song);
@@ -204,7 +207,7 @@ public class MainActivity extends Activity {
         JSONObject original=library.optJSONObject(index);if(original==null)return;try{selected=new JSONObject(original.toString());}catch(Exception e){return;}
         String uri=selected.optString("uri");int resume=autoplay?0:prefs.getInt("position",0);prefs.edit().putString("track",uri).putInt("position",resume).apply();
         put(selected,"index",index);put(selected,"cover","");emit("onTrack",selected);lyrics=Lrc.empty();sendLyrics();
-        player=new MediaPlayer();PlaybackService.attach(player,uri);final MediaPlayer p=player;p.setAudioAttributes(attributes());
+        player=new MediaPlayer();PlaybackService.attach(player,uri);PlaybackService.metadata(selected.optString("title","Música"),selected.optString("artist","Artista desconocido"));final MediaPlayer p=player;p.setAudioAttributes(attributes());
         p.setOnPreparedListener(v->{if(destroyed||p!=player)return;ready=true;PlaybackService.prepared=true;if(resume>0)p.seekTo(Math.min(resume,p.getDuration()),MediaPlayer.SEEK_CLOSEST);if(autoplay)start();sendPosition();});
         p.setOnErrorListener((v,what,extra)->{if(v!=player)return true;ready=false;audio.abandonAudioFocusRequest(focus);notice("No se pudo reproducir este FLAC. Código "+what+"/"+extra);sendPosition();return true;});
         p.setOnCompletionListener(v->{if(v==player){audio.abandonAudioFocusRequest(focus);PlaybackService.update(this,ready);sendPosition();}});
@@ -235,5 +238,5 @@ public class MainActivity extends Activity {
     @Override public void onBackPressed(){web.evaluateJavascript("window.goBack&&window.goBack()",value->{if(!"true".equals(value))super.onBackPressed();});}
     @Override protected void onStart(){super.onStart();visible=true;ui.post(tick);}
     @Override protected void onStop(){visible=false;ui.removeCallbacks(tick);super.onStop();}
-    @Override protected void onDestroy(){destroyed=true;scanGeneration.incrementAndGet();songGeneration.incrementAndGet();ui.removeCallbacksAndMessages(null);scanWorker.shutdownNow();mediaWorker.shutdownNow();artworkWorker.shutdownNow();if(player!=null){if(!ready || !player.isPlaying())PlaybackService.release();else{player.setOnPreparedListener(null);player.setOnErrorListener(null);player.setOnCompletionListener(v->PlaybackService.update(getApplicationContext(),true));}}unregisterReceiver(noisy);web.removeJavascriptInterface("Native");web.destroy();super.onDestroy();}
+    @Override protected void onDestroy(){PlaybackService.control=null;destroyed=true;scanGeneration.incrementAndGet();songGeneration.incrementAndGet();ui.removeCallbacksAndMessages(null);scanWorker.shutdownNow();mediaWorker.shutdownNow();artworkWorker.shutdownNow();if(player!=null){if(!ready || !player.isPlaying())PlaybackService.release();else{player.setOnPreparedListener(null);player.setOnErrorListener(null);player.setOnCompletionListener(v->PlaybackService.update(getApplicationContext(),true));}}unregisterReceiver(noisy);web.removeJavascriptInterface("Native");web.destroy();super.onDestroy();}
 }
