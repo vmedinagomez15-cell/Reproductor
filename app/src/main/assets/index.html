@@ -125,13 +125,27 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#0c0b12}#fl
 #flac-app .album-reveal-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 2px;border-bottom:1px solid var(--edge)}
 #flac-app .album-reveal-head strong{display:block;font-size:16px}#flac-app .album-reveal-head .sub{margin-top:4px}
 #flac-app .album-reveal-rows{max-height:48vh;overflow-y:auto;overscroll-behavior:contain}
-#flac-app .album-disc{position:absolute;top:9px;left:50%;width:min(55vw,204px);aspect-ratio:1;border-radius:50%;pointer-events:none;z-index:24;opacity:0;background:repeating-radial-gradient(circle at center,#131318 0 2px,#33333a 3px,#111116 5px,#24242a 7px);box-shadow:0 12px 28px #0008;transform:translate(-50%,0) scale(.25);transition:transform .52s cubic-bezier(.2,.75,.2,1),opacity .24s}
+#flac-app .album-disc{position:absolute;top:9px;left:50%;width:min(55vw,204px);aspect-ratio:1;border-radius:50%;pointer-events:none;z-index:24;opacity:0;background:repeating-radial-gradient(circle at center,#131318 0 2px,#33333a 3px,#111116 5px,#24242a 7px);box-shadow:0 12px 28px #0008;transform:translate(-17%,0) scale(.32);transition:transform .52s cubic-bezier(.2,.75,.2,1),opacity .24s}
 #flac-app .album-disc:before{content:'';position:absolute;inset:35%;border-radius:50%;background-image:var(--disc-cover);background-size:cover;background-position:center;border:3px solid #222}
 #flac-app .album-disc:after{content:'';position:absolute;left:49%;top:49%;width:2%;height:2%;border-radius:50%;background:#ddd}
-#flac-app .album-carousel.album-expanded .album-disc{opacity:1;transform:translate(-18%,12%) scale(.9)}
-#flac-app .album-carousel.album-expanded .album-slide[data-offset="0"]{transform:translateX(calc(-50% - 24px)) translateZ(55px) scale(.94)!important}
+#flac-app .album-carousel.album-expanded .album-disc{opacity:1;transform:translate(-50%,0) scale(.94)}
+#flac-app .album-carousel.album-expanded .album-slide[data-offset="0"]{filter:brightness(.82)!important}
 #flac-app .album-carousel.album-expanded .album-slide:not([data-offset="0"]){opacity:.22!important}
 #flac-app .album-reveal .track{min-height:57px}
+/* 5.3: impedir el desplazamiento horizontal y respetar el viewport útil de Android. */
+html,body,#flac-app,#flac-app .phone,#flac-app .shell{max-width:100%;overflow-x:hidden}
+#flac-app .phone,#flac-app .shell,#flac-app .screen,#flac-app .library-content,#flac-app .album-reveal,#flac-app .album-reveal-head,#flac-app .album-reveal-rows,#flac-app .tracks,#flac-app .track{min-width:0;max-width:100%}
+#flac-app .screen{overflow-x:hidden;touch-action:pan-y}
+#flac-app .album-carousel{max-width:none;overflow:hidden;touch-action:pan-y}
+#flac-app .album-reveal{width:100%;overflow-x:hidden;touch-action:pan-y}
+#flac-app .album-reveal-rows{overflow-x:hidden;touch-action:pan-y}
+#flac-app .album-reveal-head>div{min-width:0;flex:1;overflow-wrap:anywhere}
+#flac-app .album-reveal .track{display:flex;width:100%;min-width:0;overflow:hidden;touch-action:pan-y}
+#flac-app .album-reveal .track>div:nth-child(2){flex:1;min-width:0;overflow:hidden}
+#flac-app .album-reveal .track-name,#flac-app .album-reveal .track .sub{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#flac-app .album-reveal .track-time{flex-shrink:0;white-space:nowrap}
+@media(max-width:350px){#flac-app .album-carousel{margin-left:calc(-1 * var(--pad-x));margin-right:calc(-1 * var(--pad-x))}}
+
 #flac-app .full-player{will-change:opacity,transform;backface-visibility:hidden}
 @media(prefers-reduced-motion:reduce){#flac-app .album-reveal,#flac-app .album-disc{transition:none}}
 </style></head><body><div id="flac-app"><div class="phone paused" data-theme="dark" data-style="glass">
@@ -270,7 +284,7 @@ pane.inert=true;applyLyricsState();
 function time(ms){let s=Math.max(0,Math.floor(ms/1000));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');}
 function art(el,album){el.dataset.albumKey=album;const cover=covers.get(album);el.classList.toggle('has-cover',!!cover);el.style.backgroundImage=cover?'url("'+cover+'")':'';}
 function node(tag,cls,text){const el=document.createElement(tag);if(cls)el.className=cls;if(text!==undefined)el.textContent=text;return el;}
-function groupKey(t){return (t.album||'Sin álbum')+'\u0000'+(t.artist||'');}
+function groupKey(t){return String(t.album||'Sin álbum').trim().normalize('NFC').toLocaleLowerCase();}
 function trackButton(t){requestCover(t);const b=node('button','track');b.type='button';const image=node('div','art');art(image,groupKey(t));b.appendChild(image);const copy=node('div');copy.appendChild(node('div','track-name',t.title));copy.appendChild(node('p','sub',t.artist));b.appendChild(copy);b.appendChild(node('span','track-time',t.duration?time(t.duration):'FLAC'));b.onclick=()=>native('playTrack',tracks.findIndex(x=>x.uri===t.uri));return b;}
 function requestCover(t){if(!requestedCovers.has(t.uri)){requestedCovers.add(t.uri);native('artwork',tracks.findIndex(x=>x.uri===t.uri));}}
 function renderRows(dest,items){dest.replaceChildren();items.slice(0,limit).forEach(t=>dest.appendChild(trackButton(t)));if(items.length>limit){const b=node('button','load-more','Mostrar más canciones');b.onclick=()=>{limit+=100;renderRows(dest,items)};dest.appendChild(b);}if(!items.length)dest.appendChild(node('p','empty','Todavía no hay canciones aquí.'));}
@@ -285,7 +299,7 @@ let current=Math.min(Math.max(0,window.flacAlbumIndex||0),albums.length-1);
 const slides=albums.map(([k,t],i)=>{const b=node('button','album-slide'),image=node('div','art');b.type='button';b.setAttribute('aria-label',t.album+' — '+t.artist);art(image,k);b.appendChild(image);stage.appendChild(b);b.onclick=()=>{if(i===current)toggleAlbum(k,t);else moveTo(i)};requestCover(t);return b});
 function toggleAlbum(k,t){
  if(expandedKey===k){expandedKey=null;carousel.classList.remove('album-expanded');reveal.classList.remove('open');hint.textContent='Desliza para explorar · Toca el centro para abrir';return;}
- expandedKey=k;disc.style.setProperty('--disc-cover',covers.get(k)?'url("'+covers.get(k)+'")':'none');
+ expandedKey=k;disc.dataset.albumKey=k;disc.style.setProperty('--disc-cover',covers.get(k)?'url("'+covers.get(k)+'")':'none');
  const items=tracks.filter(x=>groupKey(x)===k);
  revealHead.replaceChildren();const label=node('div');label.append(node('strong',null,t.album||'Sin álbum'),node('p','sub',(t.artist||'Artista desconocido')+' · '+items.length+' canciones'));const close=node('button','icon','✕');close.setAttribute('aria-label','Cerrar álbum');close.onclick=()=>toggleAlbum(k,t);revealHead.append(label,close);
  renderRows(revealRows,items);carousel.classList.add('album-expanded');reveal.classList.add('open');hint.textContent='Toca la carátula para cerrar el álbum';
@@ -299,11 +313,11 @@ dest.appendChild(node('h2',null,'Canciones'));const rows=node('div','tracks');de
 function openList(origin,title,filter){listOrigin=origin;listFilter=filter;limit=100;q('.list-title').textContent=title;q('.back-name').textContent=origin==='library'?'Biblioteca':'Playlists';const items=filter==='favorites'?tracks.filter(t=>favorites.has(t.uri)):tracks.filter(t=>groupKey(t)===filter);q('.list-count').textContent=items.length+' canciones';renderRows(q('.list-tracks'),items);page('list');}
 function updateFavorite(){q('.favorite-count').textContent=tracks.filter(t=>favorites.has(t.uri)).length+' canciones';const on=selected&&favorites.has(selected.uri);q('.favorite').setAttribute('aria-pressed',String(!!on));q('.favorite').style.color=on?'var(--accent)':'';q('.favorite').setAttribute('aria-label',on?'Quitar de favoritas':'Añadir a favoritas');}
 window.onLibrary=data=>{requestedCovers.clear();covers.clear();tracks=Array.isArray(data)?data:[];limit=100;renderLibrary();updateFavorite();if(pageName==='list')openList(listOrigin,q('.list-title').textContent,listFilter);};
-window.onArtwork=data=>{const t=tracks.find(x=>x.uri===data.uri);if(!t||!data.cover||!data.cover.startsWith('data:image/jpeg;base64,'))return;const k=groupKey(t);covers.set(k,data.cover);all('[data-album-key]').forEach(el=>{if(el.dataset.albumKey===k)art(el,k);});};
+window.onArtwork=data=>{const t=tracks.find(x=>x.uri===data.uri);if(!t||!data.cover||!data.cover.startsWith('data:image/jpeg;base64,'))return;const k=groupKey(t);if(!covers.has(k)){covers.set(k,data.cover);all('[data-album-key]').forEach(el=>{if(el.dataset.albumKey===k)art(el,k);});}const disc=q('.album-disc');if(disc&&disc.closest('.album-expanded')&&disc.dataset.albumKey===k)disc.style.setProperty('--disc-cover','url("'+covers.get(k)+'")');};
 window.onFavorites=data=>{favorites=new Set(data);updateFavorite();if(pageName==='list'&&listFilter==='favorites')openList('playlists','Favoritas','favorites');};
 window.onSettings=data=>{settings=data;phone.dataset.theme=data.dark?'dark':'light';phone.dataset.style=data.glass?'glass':'solid';phone.style.setProperty('--accent',palette[data.hue]||palette[1]);q('.color-name').textContent=names[data.hue]||names[1];all('button[data-theme]').forEach(b=>b.setAttribute('aria-pressed',String((b.dataset.theme==='dark')===data.dark)));all('button[data-style]').forEach(b=>b.setAttribute('aria-pressed',String((b.dataset.style==='glass')===data.glass)));all('[data-hue]').forEach(b=>b.setAttribute('aria-pressed',String(+b.dataset.hue===data.hue)));};
 window.onScan=data=>{q('.folder-name').textContent=data.folder;q('.scan-status').textContent=data.status;q('#rescan').disabled=data.busy;};
-window.onTrack=data=>{const changed=!selected||!data||selected.uri!==data.uri;selected=data;if(!data){showFull(false);q('.mini').classList.add('hidden');return;}if(data.cover&&data.cover.startsWith('data:image/jpeg;base64,')){covers.set(groupKey(data),data.cover);all('[data-album-key]').forEach(el=>{if(el.dataset.albumKey===groupKey(data))art(el,groupKey(data));});}q('.mini').classList.remove('hidden');q('.mini-title').textContent=data.title;q('.mini-artist').textContent=data.artist;q('.now-title').textContent=data.title;q('.now-meta').textContent=data.artist+' · '+data.album;q('.from-album').textContent=data.album;art(q('.bigart'),groupKey(data));art(q('.vinyl .art'),groupKey(data));if(changed){position=0;duration=data.duration||0;paintProgress();closeMenu();}updateFavorite();};
+window.onTrack=data=>{const changed=!selected||!data||selected.uri!==data.uri;selected=data;if(!data){showFull(false);q('.mini').classList.add('hidden');return;}if(data.cover&&data.cover.startsWith('data:image/jpeg;base64,')){if(!covers.has(groupKey(data))){covers.set(groupKey(data),data.cover);all('[data-album-key]').forEach(el=>{if(el.dataset.albumKey===groupKey(data))art(el,groupKey(data));});}}q('.mini').classList.remove('hidden');q('.mini-title').textContent=data.title;q('.mini-artist').textContent=data.artist;q('.now-title').textContent=data.title;q('.now-meta').textContent=data.artist+' · '+data.album;q('.from-album').textContent=data.album;art(q('.bigart'),groupKey(data));art(q('.vinyl .art'),groupKey(data));if(changed){position=0;duration=data.duration||0;paintProgress();closeMenu();}updateFavorite();};
 function paintProgress(){q('.elapsed').textContent=time(position);q('.duration').textContent='−'+time(Math.max(0,duration-position));q('.progress').style.setProperty('--played',duration?(position/duration*100)+'%':'0%');const range=q('input');range.max=String(Math.max(1,duration));range.value=String(position);range.setAttribute('aria-valuetext',time(position)+' transcurridos, '+time(Math.max(0,duration-position))+' restantes');}
 window.onPosition=data=>{playing=data.playing;phone.classList.toggle('paused',!playing);all('.toggle').forEach(b=>{b.setAttribute('aria-label',playing?'Pausar':'Reproducir');if(b.dataset.state!==String(playing)){icon(b,playing?'pause':'play');b.dataset.state=String(playing);}});q('input').disabled=!data.ready;if(!dragging){position=data.position||0;duration=data.duration||selected&&selected.duration||0;paintProgress();paintLyric();}};
 window.onLyrics=data=>{lyricData=data.lines||[];offset=data.offset||0;active=-1;const dest=q('.lyrics-content');dest.replaceChildren();q('.offset-label').textContent='Ajuste: '+offset+' ms';q('.lyric-offset').classList.toggle('hidden',!lyricData.length);if(!lyricData.length){dest.appendChild(node('p','empty','Añade un archivo LRC desde los tres puntos de esta canción.'));return;}lyricData.forEach(line=>{const b=node('button','lyric-line',line.text||'♪');b.onclick=()=>native('seek',Math.max(0,line.time-offset));dest.appendChild(b);});paintLyric();};
