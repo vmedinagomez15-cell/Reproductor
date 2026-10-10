@@ -105,6 +105,19 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#0c0b12}#fl
 }
 @media(prefers-reduced-motion:reduce){#flac-app .lyrics-content{scroll-behavior:auto}#flac-app .lyrics-toggle,#flac-app .lyric-line{transition:none}}
 
+
+/* Biblioteca 5.1: carrusel de álbumes 3D */
+#flac-app .album-carousel{position:relative;overflow:hidden;touch-action:pan-y;user-select:none;margin:0 -20px;padding:10px 0 3px}
+#flac-app .album-stage{height:245px;position:relative;perspective:850px;transform-style:preserve-3d}
+#flac-app .album-slide{position:absolute;left:50%;top:9px;width:min(55vw,204px);height:218px;transform-origin:center;transition:transform .46s cubic-bezier(.2,.8,.2,1),opacity .35s,filter .35s;will-change:transform;cursor:pointer;padding:0;text-align:center;overflow:visible}
+#flac-app .album-slide .art{width:100%;aspect-ratio:1;border-radius:19px;box-shadow:0 18px 36px #0007;border:1px solid #ffffff18}
+#flac-app .album-slide[data-offset="0"] .art{box-shadow:0 23px 45px #0009,0 0 24px color-mix(in srgb,var(--accent) 12%,transparent)}
+#flac-app .album-slide:focus-visible{outline:2px solid var(--accent);outline-offset:5px}
+#flac-app .album-carousel-info{text-align:center;min-height:59px;padding:0 15px}
+#flac-app .album-carousel-info .album-name{font-size:16px;margin:0 0 5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#flac-app .album-carousel-info .sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#flac-app .album-carousel-hint{text-align:center;font-size:11px;color:var(--sub);margin:9px 0 0;letter-spacing:.3px}
+@media(prefers-reduced-motion:reduce){#flac-app .album-slide{transition:none}}
 </style></head><body><div id="flac-app"><div class="phone paused" data-theme="dark" data-style="glass">
 <div class="shell">
 <section class="screen" data-screen="library"><h1>Biblioteca</h1><p class="sub library-count">Tu música, a tu ritmo.</p><div class="library-content"></div></section>
@@ -272,7 +285,18 @@ function trackButton(t){requestCover(t);const b=node('button','track');b.type='b
 function requestCover(t){if(!requestedCovers.has(t.uri)){requestedCovers.add(t.uri);native('artwork',tracks.findIndex(x=>x.uri===t.uri));}}
 function renderRows(dest,items){dest.replaceChildren();items.slice(0,limit).forEach(t=>dest.appendChild(trackButton(t)));if(items.length>limit){const b=node('button','load-more','Mostrar más canciones');b.onclick=()=>{limit+=100;renderRows(dest,items)};dest.appendChild(b);}if(!items.length)dest.appendChild(node('p','empty','Todavía no hay canciones aquí.'));}
 function renderLibrary(){q('.library-count').textContent=tracks.length?tracks.length+' canciones · En tu dispositivo':'Tu música, a tu ritmo.';const dest=q('.library-content');dest.replaceChildren();if(!tracks.length){const p=node('div','empty','Selecciona tu carpeta de música en Configuración para comenzar.');dest.appendChild(p);const b=node('button','primary-action','Elegir carpeta de música');b.onclick=()=>page('settings');dest.appendChild(b);return;}
-const groups=new Map();tracks.forEach(t=>{const k=groupKey(t);if(!groups.has(k))groups.set(k,t)});dest.appendChild(node('h2',null,'Álbumes'));const grid=node('div','albums');Array.from(groups.entries()).slice(0,4).forEach(([k,t])=>{const b=node('button','album'),image=node('div','art');art(image,k);b.appendChild(image);b.appendChild(node('div','album-name',t.album));b.appendChild(node('p','sub',t.artist));b.onclick=()=>openList('library',t.album,k);grid.appendChild(b);requestCover(t)});dest.appendChild(grid);dest.appendChild(node('h2',null,'Canciones'));const rows=node('div','tracks');dest.appendChild(rows);renderRows(rows,tracks);}
+const groups=new Map();tracks.forEach(t=>{const k=groupKey(t);if(!groups.has(k))groups.set(k,t)});
+const albums=Array.from(groups.entries());dest.appendChild(node('h2',null,'Álbumes'));
+const carousel=node('div','album-carousel'),stage=node('div','album-stage'),info=node('div','album-carousel-info'),hint=node('p','album-carousel-hint','Desliza para explorar · Toca el centro para abrir');
+carousel.setAttribute('aria-label','Carrusel de álbumes');carousel.append(stage,info,hint);dest.appendChild(carousel);
+let current=Math.min(Math.max(0,window.flacAlbumIndex||0),albums.length-1);
+const slides=albums.map(([k,t],i)=>{const b=node('button','album-slide'),image=node('div','art');b.type='button';b.setAttribute('aria-label',t.album+' — '+t.artist);art(image,k);b.appendChild(image);stage.appendChild(b);b.onclick=()=>{if(i===current)openList('library',t.album,k);else moveTo(i)};requestCover(t);return b});
+function moveTo(i){current=(i+albums.length)%albums.length;window.flacAlbumIndex=current;slides.forEach((b,j)=>{let d=j-current;if(d>albums.length/2)d-=albums.length;if(d< -albums.length/2)d+=albums.length;const a=Math.abs(d),visible=a<=2;b.style.display=visible?'block':'none';b.dataset.offset=String(d);b.style.zIndex=String(20-a);b.style.opacity=a===0?'1':a===1?'.78':'.35';b.style.filter=a===0?'none':a===1?'brightness(.72)':'brightness(.55)';b.style.pointerEvents=visible?'auto':'none';b.style.transform='translateX(calc(-50% + '+(d*105)+'px)) translateZ('+(a===0?55:-a*55)+'px) rotateY('+(-d*23)+'deg) scale('+(a===0?1:a===1?.81:.65)+')';b.setAttribute('aria-current',a===0?'true':'false');b.tabIndex=visible?0:-1});info.replaceChildren(node('div','album-name',albums[current][1].album||'Sin álbum'),node('p','sub',albums[current][1].artist||'Artista desconocido'));}
+let touchX=0,touchY=0;carousel.addEventListener('touchstart',e=>{touchX=e.touches[0].clientX;touchY=e.touches[0].clientY},{passive:true});carousel.addEventListener('touchend',e=>{const dx=e.changedTouches[0].clientX-touchX,dy=e.changedTouches[0].clientY-touchY;if(Math.abs(dx)>35&&Math.abs(dx)>Math.abs(dy)*1.15){moveTo(current+(dx<0?1:-1));carousel.dataset.swiped='1';setTimeout(()=>delete carousel.dataset.swiped,350)}},{passive:true});
+carousel.addEventListener('click',e=>{if(carousel.dataset.swiped){e.stopPropagation();e.preventDefault()}},true);
+carousel.tabIndex=0;carousel.addEventListener('keydown',e=>{if(e.key==='ArrowRight'||e.key==='ArrowLeft'){e.preventDefault();moveTo(current+(e.key==='ArrowRight'?1:-1))}});
+moveTo(current);
+dest.appendChild(node('h2',null,'Canciones'));const rows=node('div','tracks');dest.appendChild(rows);renderRows(rows,tracks);}
 function openList(origin,title,filter){listOrigin=origin;listFilter=filter;limit=100;q('.list-title').textContent=title;q('.back-name').textContent=origin==='library'?'Biblioteca':'Playlists';const items=filter==='favorites'?tracks.filter(t=>favorites.has(t.uri)):tracks.filter(t=>groupKey(t)===filter);q('.list-count').textContent=items.length+' canciones';renderRows(q('.list-tracks'),items);page('list');}
 function updateFavorite(){q('.favorite-count').textContent=tracks.filter(t=>favorites.has(t.uri)).length+' canciones';const on=selected&&favorites.has(selected.uri);q('.favorite').setAttribute('aria-pressed',String(!!on));q('.favorite').style.color=on?'var(--accent)':'';q('.favorite').setAttribute('aria-label',on?'Quitar de favoritas':'Añadir a favoritas');}
 window.onLibrary=data=>{requestedCovers.clear();covers.clear();tracks=Array.isArray(data)?data:[];limit=100;renderLibrary();updateFavorite();if(pageName==='list')openList(listOrigin,q('.list-title').textContent,listFilter);};
