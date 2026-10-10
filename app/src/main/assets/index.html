@@ -222,18 +222,19 @@ html,body,#flac-app,#flac-app .phone,#flac-app .shell{max-width:100%;overflow-x:
  border:1px solid color-mix(in srgb,var(--accent) 23%,#ffffff35);
  box-shadow:inset 0 1px 0 #ffffff55,0 4px 15px #0002,0 0 15px color-mix(in srgb,var(--accent) 12%,transparent);
  transform:translateX(0);
- transition:transform 360ms cubic-bezier(.22,1,.36,1),background 260ms ease,box-shadow 260ms ease;
+ transition:transform 290ms cubic-bezier(.2,.8,.2,1);
+ will-change:transform;
  pointer-events:none;z-index:0;
 }
 #flac-app .library-tabs.show-albums::before{transform:translateX(calc(100% + 6px))}
 #flac-app .library-tabs button,#flac-app .library-tabs button[aria-selected=true]{
  position:relative;z-index:1;background:transparent!important;box-shadow:none!important;
- transition:color 260ms ease,text-shadow 260ms ease;
+ transition:color 180ms ease;
 }
 #flac-app .library-tabs button[aria-selected=true]{text-shadow:0 0 12px color-mix(in srgb,var(--accent) 22%,transparent)}
 #flac-app .library-tabs button:active{color:var(--fg);text-shadow:0 0 18px var(--accent)}
-#flac-app .library-enter-from-right{animation:librarySlideFromRight 360ms cubic-bezier(.22,1,.36,1) both}
-#flac-app .library-enter-from-left{animation:librarySlideFromLeft 360ms cubic-bezier(.22,1,.36,1) both}
+#flac-app .library-enter-from-right{animation:librarySlideFromRight 270ms cubic-bezier(.2,.8,.2,1) both}
+#flac-app .library-enter-from-left{animation:librarySlideFromLeft 270ms cubic-bezier(.2,.8,.2,1) both}
 @keyframes librarySlideFromRight{from{opacity:0;transform:translate3d(24px,0,0)}to{opacity:1;transform:translate3d(0,0,0)}}
 @keyframes librarySlideFromLeft{from{opacity:0;transform:translate3d(-24px,0,0)}to{opacity:1;transform:translate3d(0,0,0)}}
 @media(prefers-reduced-motion:reduce){
@@ -242,14 +243,27 @@ html,body,#flac-app,#flac-app .phone,#flac-app .shell{max-width:100%;overflow-x:
 }
 
 
+/* 5.4.2 optimización: preservar Liquid Glass, animar solo capas compositoras. */
+#flac-app .songs-panel.library-enter-from-left,
+#flac-app .albums-panel.library-enter-from-right{
+ backface-visibility:hidden;
+ -webkit-backface-visibility:hidden;
+}
+#flac-app .song-results,#flac-app .albums-panel{overscroll-behavior:contain}
+#flac-app .sort-overlay:not(.hidden) .sort-dialog{backface-visibility:hidden}
+@media(prefers-reduced-motion:reduce){
+ #flac-app #sort-open{transition:none!important}
+ #flac-app .sort-overlay:not(.hidden),#flac-app .sort-overlay:not(.hidden) .sort-dialog{animation:none!important}
+}
+
 /* Biblioteca 5.4.2: búsqueda y menú de ordenación */
 #flac-app #song-search{appearance:none;-webkit-appearance:none;transition:border-color .22s,box-shadow .22s,background .22s}
 #flac-app #song-search:focus{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 15%,transparent),inset 0 1px #ffffff28}
-#flac-app #sort-open{transition:transform .25s cubic-bezier(.22,1,.36,1),background .25s,box-shadow .25s,border-color .25s}
+#flac-app #sort-open{transition:transform .18s ease,background .18s ease}
 #flac-app #sort-open:active{transform:scale(.92);background:color-mix(in srgb,var(--accent) 23%,transparent)}
 #flac-app #sort-open[aria-expanded=true]{background:color-mix(in srgb,var(--accent) 20%,transparent);border-color:var(--accent);box-shadow:0 0 18px color-mix(in srgb,var(--accent) 24%,transparent)}
 #flac-app .sort-overlay:not(.hidden){animation:sortFadeIn .23s ease both}
-#flac-app .sort-overlay:not(.hidden) .sort-dialog{animation:sortSheetIn .34s cubic-bezier(.22,1,.36,1) both}
+#flac-app .sort-overlay:not(.hidden) .sort-dialog{animation:sortSheetIn .26s cubic-bezier(.2,.8,.2,1) both}
 #flac-app .sort-dialog button[data-sort]{transition:background .2s,transform .2s,border-color .2s}
 #flac-app .sort-dialog button[data-sort]:active{transform:scale(.98)}
 #flac-app .sort-dialog button[data-sort][aria-pressed=true]{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 18%,transparent)}
@@ -416,8 +430,7 @@ function setLibraryTab(tab){
  outgoing.classList.add('hidden');
  outgoing.classList.remove('library-enter-from-left','library-enter-from-right');
  incoming.classList.remove('hidden','library-enter-from-left','library-enter-from-right');
- // Reinicia la animación cuando el usuario cambia rápidamente de apartado.
- void incoming.offsetWidth;
+ // Una sola lectura de estilo al cambiar de pestaña; no forzar reflow con offsetWidth.
  incoming.classList.add(tab==='albums'?'library-enter-from-right':'library-enter-from-left');
  q('#tab-songs').setAttribute('aria-selected',String(tab==='songs'));
  q('#tab-albums').setAttribute('aria-selected',String(tab==='albums'));

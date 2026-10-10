@@ -1,4 +1,4 @@
-name: Compilar APK FlacPrueba 5.4.1
+name: Compilar APK Reproductor
 
 on:
   workflow_dispatch:
@@ -28,10 +28,21 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
       - name: Compilar APK de prueba
         run: bash ./gradlew --no-daemon assembleDebug
+      - name: Nombrar APK según versión
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(sed -n "s/^[[:space:]]*versionName[[:space:]]*['\"]\([^'\"]*\)['\"].*/\1/p" app/build.gradle | head -n 1)
+          if [ -z "$VERSION" ]; then
+            echo "No se encontró versionName en app/build.gradle" >&2
+            exit 1
+          fi
+          cp app/build/outputs/apk/debug/app-debug.apk "app/build/outputs/apk/debug/Reproductor-${VERSION}.apk"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - name: Publicar APK descargable
         uses: actions/upload-artifact@v4
         with:
-          name: FlacPrueba-v5.4.1-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: Reproductor-${{ steps.version.outputs.version }}-APK
+          path: app/build/outputs/apk/debug/Reproductor-${{ steps.version.outputs.version }}.apk
           if-no-files-found: error
           retention-days: 30
