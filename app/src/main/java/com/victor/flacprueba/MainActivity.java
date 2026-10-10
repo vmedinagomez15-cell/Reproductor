@@ -32,6 +32,7 @@ public class MainActivity extends Activity {
     private final ExecutorService mediaWorker=Executors.newSingleThreadExecutor();
     private final AtomicInteger scanGeneration=new AtomicInteger(), songGeneration=new AtomicInteger();
     private JSONArray library=new JSONArray();
+    private JSONArray playQueue=null;
     private JSONObject selected;
     private Uri pendingLyric;
     private MediaPlayer player;
@@ -63,7 +64,7 @@ public class MainActivity extends Activity {
                 return new WebResourceResponse("text/plain","UTF-8",new ByteArrayInputStream(new byte[0]));
             }
             @Override public void onPageFinished(WebView v,String url){
-                if(pageReady)return;pageReady=true;loadLibrary();sendSettings();sendLibrary();sendScan();
+                if(pageReady)return;pageReady=true;loadLibrary();sendSettings();sendLibrary();sendPlaylists();sendScan();
                 String last=prefs.getString("track","");
                 if(PlaybackService.player!=null && last.equals(PlaybackService.trackUri)){
                     player=PlaybackService.player;ready=PlaybackService.prepared;
@@ -107,6 +108,7 @@ public class MainActivity extends Activity {
     private JSONObject settings(){JSONObject j=new JSONObject();put(j,"dark",prefs.getBoolean("dark",true));put(j,"glass",prefs.getBoolean("glass",true));put(j,"hue",prefs.getInt("hue",1));return j;}
     private void sendSettings(){emit("onSettings",settings());systemColors(prefs.getBoolean("dark",true));}
     private void systemColors(boolean dark){int c=dark?0xff0c0b12:0xfff1eef7;getWindow().setStatusBarColor(c);getWindow().setNavigationBarColor(c);web.setBackgroundColor(c);if(safeRoot!=null)safeRoot.setBackgroundColor(c);getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE|View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN|View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION|(dark?0:View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR|View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR));}
+    private void sendPlaylists(){try{emit("onPlaylists",new JSONArray(prefs.getString("playlists","[]")));}catch(Exception ignored){emit("onPlaylists",new JSONArray());}}
     private void sendLibrary(){emit("onLibrary",library);emit("onFavorites",new JSONArray(prefs.getStringSet("favorites",new HashSet<>())));}
     private void sendScan(){JSONObject j=new JSONObject();put(j,"folder",prefs.getString("folderName","Ninguna carpeta seleccionada"));put(j,"status",scanStatus);put(j,"busy",scanning);put(j,"count",library.length());emit("onScan",j);}
     private void loadLibrary(){try(InputStream in=new FileInputStream(new File(getFilesDir(),"library.json"))){library=new JSONArray(new String(readLimit(in,32*1024*1024),StandardCharsets.UTF_8));scanStatus=library.length()+" archivos FLAC guardados.";}catch(Exception ignored){library=new JSONArray();}}
@@ -123,7 +125,9 @@ public class MainActivity extends Activity {
             artworkWorker.execute(()->{String image=readArtwork(Uri.parse(uri));ui.post(()->{if(destroyed)return;JSONObject data=new JSONObject();put(data,"uri",uri);put(data,"cover",image);emit("onArtwork",data);});});});}
         @JavascriptInterface public void chooseFolder(){ui.post(()->{Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);i.putExtra(Intent.EXTRA_LOCAL_ONLY,true);startActivityForResult(i,TREE);});}
         @JavascriptInterface public void rescan(){ui.post(()->{String s=prefs.getString("folder",null);if(s==null)notice("Selecciona una carpeta primero.");else scan(Uri.parse(s));});}
-        @JavascriptInterface public void playTrack(int i){ui.post(()->openTrack(i,true));}
+        @JavascriptInterface public void playTrack(int i){ui.post(()->{playQueue=null;prefs.edit().remove("queue").apply();openTrack(i,true);});}
+        @JavascriptInterface public void playQueue(String json){ui.post(()->{try{JSONArray source=new JSONArray(json);JSONArray valid=new JSONArray();for(int i=0;i<source.length()&&i<2000;i++){int index=source.optInt(i,-1);if(index>=0&&index<library.length()&&!contains(valid,index))valid.put(index);}if(valid.length()>0){playQueue=valid;prefs.edit().putString("queue",valid.toString()).apply();openTrack(valid.optInt(0),true);}}catch(Exception e){notice("No se pudo iniciar la lista.");}});}
+        @JavascriptInterface public void savePlaylists(String json){ui.post(()->{try{JSONArray data=new JSONArray(json);if(data.length()>100||json.length()>500000)throw new Exception();prefs.edit().putString("playlists",data.toString()).apply();}catch(Exception e){notice("No se pudo guardar la playlist.");}});}
         @JavascriptInterface public void toggle(){ui.post(()->{if(!ready||player==null){notice("Selecciona una canción de la biblioteca.");return;}if(player.isPlaying())pause();else start();});}
         @JavascriptInterface public void seek(long ms){ui.post(()->{if(ready&&player!=null){player.seekTo(Math.max(0,Math.min(ms,player.getDuration())),MediaPlayer.SEEK_CLOSEST);sendPosition();}});}
         @JavascriptInterface public void skip(int direction){ui.post(()->skipTrack(direction));}
@@ -210,7 +214,7 @@ public class MainActivity extends Activity {
         player=new MediaPlayer();PlaybackService.attach(player,uri);PlaybackService.metadata(selected.optString("title","Música"),selected.optString("artist","Artista desconocido"));final MediaPlayer p=player;p.setAudioAttributes(attributes());
         p.setOnPreparedListener(v->{if(destroyed||p!=player)return;ready=true;PlaybackService.prepared=true;if(resume>0)p.seekTo(Math.min(resume,p.getDuration()),MediaPlayer.SEEK_CLOSEST);if(autoplay)start();sendPosition();});
         p.setOnErrorListener((v,what,extra)->{if(v!=player)return true;ready=false;audio.abandonAudioFocusRequest(focus);notice("No se pudo reproducir este FLAC. Código "+what+"/"+extra);sendPosition();return true;});
-        p.setOnCompletionListener(v->{if(v==player){audio.abandonAudioFocusRequest(focus);PlaybackService.update(this,ready);sendPosition();}});
+        p.setOnCompletionListener(v->{if(v==player&&!destroyed)skipTrack(1);});
         mediaWorker.execute(()->{
             JSONObject enriched;
             try{enriched=new JSONObject(original.toString());}catch(Exception e){return;}
@@ -225,7 +229,11 @@ public class MainActivity extends Activity {
     }
     private void start(){if(ready&&player!=null&&audio.requestAudioFocus(focus)==AudioManager.AUDIOFOCUS_REQUEST_GRANTED){player.start();PlaybackService.update(this,true);sendPosition();}}
     private void pause(){if(ready&&player!=null){if(player.isPlaying())player.pause();prefs.edit().putInt("position",player.getCurrentPosition()).apply();}if(audio!=null&&focus!=null)audio.abandonAudioFocusRequest(focus);PlaybackService.update(this,ready);sendPosition();}
-    private void skipTrack(int direction){if(selected==null||library.length()==0)return;int current=-1;for(int i=0;i<library.length();i++){if(library.optJSONObject(i).optString("uri").equals(selected.optString("uri"))){current=i;break;}}openTrack((current+(direction<0?-1:1)+library.length())%library.length(),true);}
+    private static boolean contains(JSONArray values,int index){for(int i=0;i<values.length();i++)if(values.optInt(i,-1)==index)return true;return false;}
+    private void skipTrack(int direction){if(selected==null||library.length()==0)return;int current=-1;for(int i=0;i<library.length();i++){if(library.optJSONObject(i).optString("uri").equals(selected.optString("uri"))){current=i;break;}}int target=(current+(direction<0?-1:1)+library.length())%library.length();
+        if(playQueue==null){try{String raw=prefs.getString("queue",null);if(raw!=null)playQueue=new JSONArray(raw);}catch(Exception ignored){}}
+        if(playQueue!=null&&playQueue.length()>0){int at=-1;for(int i=0;i<playQueue.length();i++)if(playQueue.optInt(i)==current){at=i;break;}if(at>=0)target=playQueue.optInt((at+(direction<0?-1:1)+playQueue.length())%playQueue.length(),target);}
+        openTrack(target,true);}
     private void sendPosition(){JSONObject j=new JSONObject();put(j,"ready",ready);put(j,"playing",ready&&player!=null&&player.isPlaying());put(j,"position",ready&&player!=null?player.getCurrentPosition():0);put(j,"duration",ready&&player!=null?player.getDuration():0);emit("onPosition",j);}
     private void sendLyrics(){JSONArray lines=new JSONArray();for(Lrc.Line l:lyrics.lines){JSONObject j=new JSONObject();put(j,"time",l.time);put(j,"text",l.text);lines.put(j);}JSONObject obj=new JSONObject();put(obj,"lines",lines);put(obj,"offset",selected==null?0:prefs.getInt("offset_"+key(selected.optString("uri")),0));emit("onLyrics",obj);}
     private void importLyrics(Uri source,String target){

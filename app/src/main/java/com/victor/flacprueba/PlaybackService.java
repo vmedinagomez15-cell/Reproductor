@@ -97,7 +97,10 @@ public class PlaybackService extends Service {
             JSONArray songs=new JSONArray(out.toString("UTF-8"));if(songs.length()==0)return;
             int current=0;
             for(int i=0;i<songs.length();i++)if(songs.optJSONObject(i).optString("uri").equals(trackUri)){current=i;break;}
-            int next=(current+direction+songs.length())%songs.length();JSONObject song=songs.optJSONObject(next);
+            int next=(current+direction+songs.length())%songs.length();
+            String queueJson=getSharedPreferences("player",MODE_PRIVATE).getString("queue",null);
+            if(queueJson!=null){try{JSONArray queue=new JSONArray(queueJson);int at=-1;for(int i=0;i<queue.length();i++)if(queue.optInt(i,-1)==current){at=i;break;}if(at>=0&&queue.length()>0){int candidate=queue.optInt((at+direction+queue.length())%queue.length(),next);if(candidate>=0&&candidate<songs.length())next=candidate;}}catch(Exception ignored){}}
+            JSONObject song=songs.optJSONObject(next);
             String uri=song.optString("uri");
             MediaPlayer replacement=new MediaPlayer();replacement.setAudioAttributes(new android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_MEDIA).setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC).build());
             replacement.setDataSource(this,Uri.parse(uri));attach(replacement,uri);
