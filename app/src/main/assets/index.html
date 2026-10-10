@@ -118,6 +118,22 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#0c0b12}#fl
 #flac-app .album-carousel-info .sub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #flac-app .album-carousel-hint{text-align:center;font-size:11px;color:var(--sub);margin:9px 0 0;letter-spacing:.3px}
 @media(prefers-reduced-motion:reduce){#flac-app .album-slide{transition:none}}
+
+/* 5.2: vinilo emergente y detalles del álbum */
+#flac-app .album-reveal{position:relative;margin:12px 0 20px;overflow:hidden;max-height:0;opacity:0;transition:max-height .42s ease,opacity .28s ease;margin-bottom:0}
+#flac-app .album-reveal.open{max-height:75vh;opacity:1;margin-bottom:20px}
+#flac-app .album-reveal-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 2px;border-bottom:1px solid var(--edge)}
+#flac-app .album-reveal-head strong{display:block;font-size:16px}#flac-app .album-reveal-head .sub{margin-top:4px}
+#flac-app .album-reveal-rows{max-height:48vh;overflow-y:auto;overscroll-behavior:contain}
+#flac-app .album-disc{position:absolute;top:9px;left:50%;width:min(55vw,204px);aspect-ratio:1;border-radius:50%;pointer-events:none;z-index:24;opacity:0;background:repeating-radial-gradient(circle at center,#131318 0 2px,#33333a 3px,#111116 5px,#24242a 7px);box-shadow:0 12px 28px #0008;transform:translate(-50%,0) scale(.25);transition:transform .52s cubic-bezier(.2,.75,.2,1),opacity .24s}
+#flac-app .album-disc:before{content:'';position:absolute;inset:35%;border-radius:50%;background-image:var(--disc-cover);background-size:cover;background-position:center;border:3px solid #222}
+#flac-app .album-disc:after{content:'';position:absolute;left:49%;top:49%;width:2%;height:2%;border-radius:50%;background:#ddd}
+#flac-app .album-carousel.album-expanded .album-disc{opacity:1;transform:translate(-18%,12%) scale(.9)}
+#flac-app .album-carousel.album-expanded .album-slide[data-offset="0"]{transform:translateX(calc(-50% - 24px)) translateZ(55px) scale(.94)!important}
+#flac-app .album-carousel.album-expanded .album-slide:not([data-offset="0"]){opacity:.22!important}
+#flac-app .album-reveal .track{min-height:57px}
+#flac-app .full-player{will-change:opacity,transform;backface-visibility:hidden}
+@media(prefers-reduced-motion:reduce){#flac-app .album-reveal,#flac-app .album-disc{transition:none}}
 </style></head><body><div id="flac-app"><div class="phone paused" data-theme="dark" data-style="glass">
 <div class="shell">
 <section class="screen" data-screen="library"><h1>Biblioteca</h1><p class="sub library-count">Tu música, a tu ritmo.</p><div class="library-content"></div></section>
@@ -220,50 +236,24 @@ async function showLyrics(show){
 async function showFull(show){
  requestedFull=!!show&&!!selected;
  if(playerJob||requestedFull===full)return;
- const opening=requestedFull,job={animations:[],sources:[]};playerJob=job;
+ const opening=requestedFull,job={animations:[]};playerJob=job;
  closeMenu();settleLyrics();
+ // Avoid cloning the entire player, measuring every element, and animating
+ // multiple expensive blur and artwork layers on each open/close.
  pane.classList.remove('hidden');pane.inert=true;shell.inert=true;
- shell.setAttribute('aria-hidden','true');phone.classList.add('transitioning');
+ phone.classList.add('transitioning');
  sizeArtwork();
- const vinyl=q('.vinyl');vinyl.style.animationPlayState='paused';
  try{
-  const base=phone.getBoundingClientRect(),target=vinyl.getBoundingClientRect();
-  if(!pane.animate||target.width===0)return;
-  const cx=target.left+target.width/2,cy=target.top+target.height/2,reduced=reduceMotion();
-  const matrix=getComputedStyle(vinyl).transform.match(/^matrix\(([^)]+)\)$/);
-  const parts=matrix?matrix[1].split(',').map(Number):[1,0];
-  const angle=Math.atan2(parts[1],parts[0])*180/Math.PI;
-  const sourceNodes=[q(lyricsVisible?'.lyrics-panel':'.bigart'),q('.player-head'),q('.song-info'),q('.progress'),q('.play-controls'),q('.extra-controls')];
-  sourceNodes.forEach((el,i)=>{
-   const rect=el.getBoundingClientRect();if(!rect.width||!rect.height)return;
-   const isCover=el.classList.contains('bigart'),isLyrics=el.classList.contains('lyrics-panel'),clone=el.cloneNode(!isLyrics);
-   clone.removeAttribute('id');clone.querySelectorAll('[id]').forEach(x=>x.removeAttribute('id'));clone.inert=true;
-   Object.assign(clone.style,{position:'absolute',inset:'auto',margin:'0',left:(rect.left-base.left)+'px',top:(rect.top-base.top)+'px',width:rect.width+'px',height:rect.height+'px',maxWidth:'none',maxHeight:'none',minHeight:'0',transformOrigin:'50% 50%'});
-   // Preserve the visible lyric position without duplicating thousands of lines.
-   if(isLyrics){
-    const originalList=el.querySelector('.lyrics-content'),copyList=originalList.cloneNode(false),view=originalList.getBoundingClientRect();
-    const visible=Array.from(originalList.children).filter(x=>{const r=x.getBoundingClientRect();return r.bottom>view.top&&r.top<view.bottom});
-    visible.forEach(x=>copyList.appendChild(x.cloneNode(true)));
-    if(visible.length)copyList.firstElementChild.style.marginTop=(visible[0].getBoundingClientRect().top-view.top-parseFloat(getComputedStyle(originalList).paddingTop))+'px';
-    clone.appendChild(copyList);const adjustment=el.querySelector('.lyric-offset').cloneNode(true);adjustment.querySelectorAll('[id]').forEach(x=>x.removeAttribute('id'));clone.appendChild(adjustment);
-   }
-   flight.appendChild(clone);el.style.visibility='hidden';job.sources.push(el);
-   const dx=cx-rect.left-rect.width/2,dy=cy-rect.top-rect.height/2,scale=isCover?q('.vinyl .art').offsetWidth/rect.width:.035;
-   const frames=[
-    {transform:'translate(0,0) scale(1) rotate(0deg)',opacity:1,borderRadius:isCover?'26px':'0px',offset:0},
-    {transform:'translate('+(dx*.7+(isCover?0:16))+'px,'+(dy*.66)+'px) scale('+(isCover?.43:.35)+') rotate('+(isCover?angle*.6-8:-7)+'deg)',opacity:isCover?1:.8,borderRadius:isCover?'38%':'12px',offset:.64},
-    {transform:'translate('+dx+'px,'+dy+'px) scale('+scale+') rotate('+(isCover?angle:-16)+'deg)',opacity:isCover?1:0,borderRadius:isCover?'50%':'20px',offset:1}
-   ];
-   const keyframes=reduced?(opening?[{opacity:0},{opacity:1}]:[{opacity:1},{opacity:0}]):(opening?frames.slice().reverse().map(f=>Object.assign({},f,{offset:1-f.offset})):frames);
-   job.animations.push(clone.animate(keyframes,{duration:reduced?100:isCover?760:590,delay:reduced?0:opening?(isCover?0:80+i*20):(isCover?30:(sourceNodes.length-i)*20),easing:'cubic-bezier(.22,.7,.16,1)',fill:'both'}));
-  });
-  job.animations.push(pane.animate(opening?[{opacity:0},{opacity:1}]:[{opacity:1},{opacity:0}],{duration:reduced?100:560,easing:'ease-in-out',fill:'both'}));
-  await Promise.all(job.animations.map(a=>a.finished.catch(()=>{})));
+  if(pane.animate){
+   const frames=opening?[{opacity:0,transform:'translate3d(0,22px,0)'},{opacity:1,transform:'translate3d(0,0,0)'}]:[{opacity:1,transform:'translate3d(0,0,0)'},{opacity:0,transform:'translate3d(0,22px,0)'}];
+   const animation=pane.animate(frames,{duration:reduceMotion()?0:240,easing:'cubic-bezier(.2,.7,.2,1)',fill:'both'});
+   job.animations.push(animation);await animation.finished.catch(()=>{});
+  }
  }finally{
-  job.animations.forEach(a=>a.cancel());job.sources.forEach(el=>el.style.visibility='');flight.replaceChildren();
+  job.animations.forEach(a=>a.cancel());
   full=opening;pane.classList.toggle('hidden',!full);pane.inert=!full;shell.inert=full;
   shell.setAttribute('aria-hidden',String(full));phone.classList.remove('transitioning');
-  vinyl.style.animationPlayState='';playerJob=null;sizeArtwork();
+  playerJob=null;sizeArtwork();
   if(full){active=-1;paintLyric(true);q('.close-player').focus({preventScroll:true});}
   else if(selected)q('.mini-open').focus({preventScroll:true});
   if(requestedFull!==full)showFull(requestedFull);
@@ -288,10 +278,19 @@ function renderLibrary(){q('.library-count').textContent=tracks.length?tracks.le
 const groups=new Map();tracks.forEach(t=>{const k=groupKey(t);if(!groups.has(k))groups.set(k,t)});
 const albums=Array.from(groups.entries());dest.appendChild(node('h2',null,'Álbumes'));
 const carousel=node('div','album-carousel'),stage=node('div','album-stage'),info=node('div','album-carousel-info'),hint=node('p','album-carousel-hint','Desliza para explorar · Toca el centro para abrir');
-carousel.setAttribute('aria-label','Carrusel de álbumes');carousel.append(stage,info,hint);dest.appendChild(carousel);
+const disc=node('div','album-disc');disc.setAttribute('aria-hidden','true');stage.appendChild(disc);
+const reveal=node('section','album-reveal'),revealHead=node('div','album-reveal-head'),revealRows=node('div','album-reveal-rows');reveal.append(revealHead,revealRows);let expandedKey=null;
+carousel.setAttribute('aria-label','Carrusel de álbumes');carousel.append(stage,info,hint);dest.appendChild(carousel);dest.appendChild(reveal);
 let current=Math.min(Math.max(0,window.flacAlbumIndex||0),albums.length-1);
-const slides=albums.map(([k,t],i)=>{const b=node('button','album-slide'),image=node('div','art');b.type='button';b.setAttribute('aria-label',t.album+' — '+t.artist);art(image,k);b.appendChild(image);stage.appendChild(b);b.onclick=()=>{if(i===current)openList('library',t.album,k);else moveTo(i)};requestCover(t);return b});
-function moveTo(i){current=(i+albums.length)%albums.length;window.flacAlbumIndex=current;slides.forEach((b,j)=>{let d=j-current;if(d>albums.length/2)d-=albums.length;if(d< -albums.length/2)d+=albums.length;const a=Math.abs(d),visible=a<=2;b.style.display=visible?'block':'none';b.dataset.offset=String(d);b.style.zIndex=String(20-a);b.style.opacity=a===0?'1':a===1?'.78':'.35';b.style.filter=a===0?'none':a===1?'brightness(.72)':'brightness(.55)';b.style.pointerEvents=visible?'auto':'none';b.style.transform='translateX(calc(-50% + '+(d*105)+'px)) translateZ('+(a===0?55:-a*55)+'px) rotateY('+(-d*23)+'deg) scale('+(a===0?1:a===1?.81:.65)+')';b.setAttribute('aria-current',a===0?'true':'false');b.tabIndex=visible?0:-1});info.replaceChildren(node('div','album-name',albums[current][1].album||'Sin álbum'),node('p','sub',albums[current][1].artist||'Artista desconocido'));}
+const slides=albums.map(([k,t],i)=>{const b=node('button','album-slide'),image=node('div','art');b.type='button';b.setAttribute('aria-label',t.album+' — '+t.artist);art(image,k);b.appendChild(image);stage.appendChild(b);b.onclick=()=>{if(i===current)toggleAlbum(k,t);else moveTo(i)};requestCover(t);return b});
+function toggleAlbum(k,t){
+ if(expandedKey===k){expandedKey=null;carousel.classList.remove('album-expanded');reveal.classList.remove('open');hint.textContent='Desliza para explorar · Toca el centro para abrir';return;}
+ expandedKey=k;disc.style.setProperty('--disc-cover',covers.get(k)?'url("'+covers.get(k)+'")':'none');
+ const items=tracks.filter(x=>groupKey(x)===k);
+ revealHead.replaceChildren();const label=node('div');label.append(node('strong',null,t.album||'Sin álbum'),node('p','sub',(t.artist||'Artista desconocido')+' · '+items.length+' canciones'));const close=node('button','icon','✕');close.setAttribute('aria-label','Cerrar álbum');close.onclick=()=>toggleAlbum(k,t);revealHead.append(label,close);
+ renderRows(revealRows,items);carousel.classList.add('album-expanded');reveal.classList.add('open');hint.textContent='Toca la carátula para cerrar el álbum';
+ }
+ function moveTo(i){if(expandedKey){expandedKey=null;carousel.classList.remove('album-expanded');reveal.classList.remove('open');hint.textContent='Desliza para explorar · Toca el centro para abrir';}current=(i+albums.length)%albums.length;window.flacAlbumIndex=current;slides.forEach((b,j)=>{let d=j-current;if(d>albums.length/2)d-=albums.length;if(d< -albums.length/2)d+=albums.length;const a=Math.abs(d),visible=a<=2;b.style.display=visible?'block':'none';b.dataset.offset=String(d);b.style.zIndex=String(20-a);b.style.opacity=a===0?'1':a===1?'.78':'.35';b.style.filter=a===0?'none':a===1?'brightness(.72)':'brightness(.55)';b.style.pointerEvents=visible?'auto':'none';b.style.transform='translateX(calc(-50% + '+(d*105)+'px)) translateZ('+(a===0?55:-a*55)+'px) rotateY('+(-d*23)+'deg) scale('+(a===0?1:a===1?.81:.65)+')';b.setAttribute('aria-current',a===0?'true':'false');b.tabIndex=visible?0:-1});info.replaceChildren(node('div','album-name',albums[current][1].album||'Sin álbum'),node('p','sub',albums[current][1].artist||'Artista desconocido'));}
 let touchX=0,touchY=0;carousel.addEventListener('touchstart',e=>{touchX=e.touches[0].clientX;touchY=e.touches[0].clientY},{passive:true});carousel.addEventListener('touchend',e=>{const dx=e.changedTouches[0].clientX-touchX,dy=e.changedTouches[0].clientY-touchY;if(Math.abs(dx)>35&&Math.abs(dx)>Math.abs(dy)*1.15){moveTo(current+(dx<0?1:-1));carousel.dataset.swiped='1';setTimeout(()=>delete carousel.dataset.swiped,350)}},{passive:true});
 carousel.addEventListener('click',e=>{if(carousel.dataset.swiped){e.stopPropagation();e.preventDefault()}},true);
 carousel.tabIndex=0;carousel.addEventListener('keydown',e=>{if(e.key==='ArrowRight'||e.key==='ArrowLeft'){e.preventDefault();moveTo(current+(e.key==='ArrowRight'?1:-1))}});
@@ -304,7 +303,7 @@ window.onArtwork=data=>{const t=tracks.find(x=>x.uri===data.uri);if(!t||!data.co
 window.onFavorites=data=>{favorites=new Set(data);updateFavorite();if(pageName==='list'&&listFilter==='favorites')openList('playlists','Favoritas','favorites');};
 window.onSettings=data=>{settings=data;phone.dataset.theme=data.dark?'dark':'light';phone.dataset.style=data.glass?'glass':'solid';phone.style.setProperty('--accent',palette[data.hue]||palette[1]);q('.color-name').textContent=names[data.hue]||names[1];all('button[data-theme]').forEach(b=>b.setAttribute('aria-pressed',String((b.dataset.theme==='dark')===data.dark)));all('button[data-style]').forEach(b=>b.setAttribute('aria-pressed',String((b.dataset.style==='glass')===data.glass)));all('[data-hue]').forEach(b=>b.setAttribute('aria-pressed',String(+b.dataset.hue===data.hue)));};
 window.onScan=data=>{q('.folder-name').textContent=data.folder;q('.scan-status').textContent=data.status;q('#rescan').disabled=data.busy;};
-window.onTrack=data=>{const changed=!selected||!data||selected.uri!==data.uri;selected=data;if(!data){showFull(false);q('.mini').classList.add('hidden');return;}if(data.cover&&data.cover.startsWith('data:image/jpeg;base64,')){covers.set(groupKey(data),data.cover);renderLibrary();}q('.mini').classList.remove('hidden');q('.mini-title').textContent=data.title;q('.mini-artist').textContent=data.artist;q('.now-title').textContent=data.title;q('.now-meta').textContent=data.artist+' · '+data.album;q('.from-album').textContent=data.album;art(q('.bigart'),groupKey(data));art(q('.vinyl .art'),groupKey(data));if(changed){position=0;duration=data.duration||0;paintProgress();closeMenu();}updateFavorite();};
+window.onTrack=data=>{const changed=!selected||!data||selected.uri!==data.uri;selected=data;if(!data){showFull(false);q('.mini').classList.add('hidden');return;}if(data.cover&&data.cover.startsWith('data:image/jpeg;base64,')){covers.set(groupKey(data),data.cover);all('[data-album-key]').forEach(el=>{if(el.dataset.albumKey===groupKey(data))art(el,groupKey(data));});}q('.mini').classList.remove('hidden');q('.mini-title').textContent=data.title;q('.mini-artist').textContent=data.artist;q('.now-title').textContent=data.title;q('.now-meta').textContent=data.artist+' · '+data.album;q('.from-album').textContent=data.album;art(q('.bigart'),groupKey(data));art(q('.vinyl .art'),groupKey(data));if(changed){position=0;duration=data.duration||0;paintProgress();closeMenu();}updateFavorite();};
 function paintProgress(){q('.elapsed').textContent=time(position);q('.duration').textContent='−'+time(Math.max(0,duration-position));q('.progress').style.setProperty('--played',duration?(position/duration*100)+'%':'0%');const range=q('input');range.max=String(Math.max(1,duration));range.value=String(position);range.setAttribute('aria-valuetext',time(position)+' transcurridos, '+time(Math.max(0,duration-position))+' restantes');}
 window.onPosition=data=>{playing=data.playing;phone.classList.toggle('paused',!playing);all('.toggle').forEach(b=>{b.setAttribute('aria-label',playing?'Pausar':'Reproducir');if(b.dataset.state!==String(playing)){icon(b,playing?'pause':'play');b.dataset.state=String(playing);}});q('input').disabled=!data.ready;if(!dragging){position=data.position||0;duration=data.duration||selected&&selected.duration||0;paintProgress();paintLyric();}};
 window.onLyrics=data=>{lyricData=data.lines||[];offset=data.offset||0;active=-1;const dest=q('.lyrics-content');dest.replaceChildren();q('.offset-label').textContent='Ajuste: '+offset+' ms';q('.lyric-offset').classList.toggle('hidden',!lyricData.length);if(!lyricData.length){dest.appendChild(node('p','empty','Añade un archivo LRC desde los tres puntos de esta canción.'));return;}lyricData.forEach(line=>{const b=node('button','lyric-line',line.text||'♪');b.onclick=()=>native('seek',Math.max(0,line.time-offset));dest.appendChild(b);});paintLyric();};
