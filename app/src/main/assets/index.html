@@ -212,6 +212,35 @@ html,body,#flac-app,#flac-app .phone,#flac-app .shell{max-width:100%;overflow-x:
 #flac-app .playlist-remove{min-width:40px;color:var(--accent);font-size:23px}
 @keyframes playlistIn{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
 @media(prefers-reduced-motion:reduce){#flac-app .phone:before,#flac-app .album-carousel.album-expanded.album-playing .album-disc{animation:none!important}#flac-app .playlist-custom-row,#flac-app .playlist-overlay,#flac-app .playlist-dialog{animation:none!important}}
+
+/* 5.4.2: transicion animada Canciones / Albumes */
+#flac-app .library-tabs{position:relative;isolation:isolate}
+#flac-app .library-tabs::before{
+ content:"";position:absolute;top:4px;bottom:4px;left:4px;
+ width:calc((100% - 14px)/2);border-radius:18px;
+ background:linear-gradient(145deg,color-mix(in srgb,var(--accent) 23%,#ffffff18),color-mix(in srgb,var(--accent) 11%,transparent));
+ border:1px solid color-mix(in srgb,var(--accent) 23%,#ffffff35);
+ box-shadow:inset 0 1px 0 #ffffff55,0 4px 15px #0002,0 0 15px color-mix(in srgb,var(--accent) 12%,transparent);
+ transform:translateX(0);
+ transition:transform 360ms cubic-bezier(.22,1,.36,1),background 260ms ease,box-shadow 260ms ease;
+ pointer-events:none;z-index:0;
+}
+#flac-app .library-tabs.show-albums::before{transform:translateX(calc(100% + 6px))}
+#flac-app .library-tabs button,#flac-app .library-tabs button[aria-selected=true]{
+ position:relative;z-index:1;background:transparent!important;box-shadow:none!important;
+ transition:color 260ms ease,text-shadow 260ms ease;
+}
+#flac-app .library-tabs button[aria-selected=true]{text-shadow:0 0 12px color-mix(in srgb,var(--accent) 22%,transparent)}
+#flac-app .library-tabs button:active{color:var(--fg);text-shadow:0 0 18px var(--accent)}
+#flac-app .library-enter-from-right{animation:librarySlideFromRight 360ms cubic-bezier(.22,1,.36,1) both}
+#flac-app .library-enter-from-left{animation:librarySlideFromLeft 360ms cubic-bezier(.22,1,.36,1) both}
+@keyframes librarySlideFromRight{from{opacity:0;transform:translate3d(24px,0,0)}to{opacity:1;transform:translate3d(0,0,0)}}
+@keyframes librarySlideFromLeft{from{opacity:0;transform:translate3d(-24px,0,0)}to{opacity:1;transform:translate3d(0,0,0)}}
+@media(prefers-reduced-motion:reduce){
+ #flac-app .library-tabs::before{transition:none}
+ #flac-app .library-enter-from-right,#flac-app .library-enter-from-left{animation:none}
+}
+
 </style></head><body><div id="flac-app"><div class="phone paused" data-theme="dark" data-style="glass">
 <div class="shell">
 <section class="screen" data-screen="library"><h1>Biblioteca</h1><p class="sub library-count">Tu música, a tu ritmo.</p><div class="library-tabs" role="tablist" aria-label="Biblioteca"><button id="tab-songs" role="tab" aria-selected="true">Canciones</button><button id="tab-albums" role="tab" aria-selected="false">Álbumes</button></div><div class="songs-panel"><div class="library-tools"><input id="song-search" type="search" placeholder="Buscar canciones..." aria-label="Buscar canciones" autocomplete="off"><button id="sort-open" aria-label="Ordenar canciones" aria-haspopup="dialog">☷</button></div><div class="song-results tracks"></div></div><div class="albums-panel hidden"></div><div class="sort-overlay hidden" role="presentation"><div class="sort-dialog" role="dialog" aria-modal="true" aria-label="Ordenar por"><h2>Ordenar por</h2><button data-sort="artist">Artista</button><button data-sort="album">Álbum</button><button data-sort="title">Título de la canción</button><button data-sort="date">Fecha de añadido</button><button id="sort-cancel">Cerrar</button></div></div></section>
@@ -356,7 +385,25 @@ function renderRows(dest,items){dest.replaceChildren();items.slice(0,limit).forE
 let libraryTab='songs',songSort='title';
 let playlists=[],editingPlaylist=null,activePlaylist=null;
 function sortSongs(){const query=q('#song-search').value.trim().toLocaleLowerCase();const items=tracks.filter(t=>[t.title,t.artist,t.album].some(v=>String(v||'').toLocaleLowerCase().includes(query)));items.sort((a,b)=>{if(songSort==='date')return (+b.addedAt||0)-(+a.addedAt||0)||String(a.title).localeCompare(String(b.title));return String(a[songSort]||'').localeCompare(String(b[songSort]||''),undefined,{sensitivity:'base'})||String(a.title).localeCompare(String(b.title));});renderRows(q('.song-results'),items);}
-function setLibraryTab(tab){libraryTab=tab;q('.songs-panel').classList.toggle('hidden',tab!=='songs');q('.albums-panel').classList.toggle('hidden',tab!=='albums');q('#tab-songs').setAttribute('aria-selected',String(tab==='songs'));q('#tab-albums').setAttribute('aria-selected',String(tab==='albums'));}
+function setLibraryTab(tab){
+ if(tab!=='songs'&&tab!=='albums')return;
+ const previous=libraryTab;
+ if(previous===tab)return;
+ libraryTab=tab;
+ const tabs=q('.library-tabs');
+ tabs.classList.toggle('show-albums',tab==='albums');
+ const songs=q('.songs-panel'),albums=q('.albums-panel');
+ const incoming=tab==='songs'?songs:albums;
+ const outgoing=tab==='songs'?albums:songs;
+ outgoing.classList.add('hidden');
+ outgoing.classList.remove('library-enter-from-left','library-enter-from-right');
+ incoming.classList.remove('hidden','library-enter-from-left','library-enter-from-right');
+ // Reinicia la animación cuando el usuario cambia rápidamente de apartado.
+ void incoming.offsetWidth;
+ incoming.classList.add(tab==='albums'?'library-enter-from-right':'library-enter-from-left');
+ q('#tab-songs').setAttribute('aria-selected',String(tab==='songs'));
+ q('#tab-albums').setAttribute('aria-selected',String(tab==='albums'));
+}
 q('#tab-songs').onclick=()=>setLibraryTab('songs');q('#tab-albums').onclick=()=>setLibraryTab('albums');q('#song-search').oninput=sortSongs;
 q('#sort-open').onclick=()=>q('.sort-overlay').classList.remove('hidden');q('#sort-cancel').onclick=()=>q('.sort-overlay').classList.add('hidden');q('.sort-overlay').addEventListener('click',e=>{if(e.target===q('.sort-overlay'))q('.sort-overlay').classList.add('hidden')});all('[data-sort]').forEach(b=>b.onclick=()=>{songSort=b.dataset.sort;q('.sort-overlay').classList.add('hidden');sortSongs()});
 function renderLibrary(){q('.library-count').textContent=tracks.length?tracks.length+' canciones · En tu dispositivo':'Tu música, a tu ritmo.';sortSongs();const dest=q('.albums-panel');dest.replaceChildren();if(!tracks.length){dest.appendChild(node('p','sub','Escanea una carpeta para ver tus álbumes.'));return;}
